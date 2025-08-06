@@ -199,8 +199,7 @@ class Pipe:
         """Pipe processing with streaming and UI feedback"""
         
         try:
-            # Reset any previous status
-            await self.emit_status(__event_emitter__, "info", "", True)
+            # Only reset status if there's no active request
             await self.emit_status(__event_emitter__, "info", "🚀 Initializing Flowise request...", False)
 
             if self.valves.debug_mode:
@@ -282,11 +281,7 @@ class Pipe:
 
             # Handle streaming response
             if stream_enabled:
-                try:
-                    return self._handle_streaming_response(response, __event_emitter__)
-                finally:
-                    # Ensure status is cleared when streaming ends
-                    await self.emit_status(__event_emitter__, "info", "✅ Response complete", True)
+                return self._handle_streaming_response(response, __event_emitter__)
             else:
                 # Handle non-streaming response
                 await self.emit_status(__event_emitter__, "info", "📝 Processing response...", False)
@@ -365,12 +360,6 @@ class Pipe:
                 print(f"Debug - pipe() error: {e}")
             await self.emit_status(__event_emitter__, "error", error_msg, True)
             return error_msg
-        finally:
-            if __event_emitter__:
-                try:
-                    await self.emit_status(__event_emitter__, "info", "", True)
-                except Exception:
-                    pass
 
     def _handle_streaming_response(
         self, 
@@ -409,6 +398,12 @@ class Pipe:
                             if isinstance(final_text, bytes):
                                 final_text = final_text.decode("utf-8")
                             yield final_text
+                            # Finalize status when we get the final response
+                            if __event_emitter__:
+                                try:
+                                    asyncio.create_task(self.emit_status(__event_emitter__, "info", "✅ Response complete", True))
+                                except Exception:
+                                    pass
                         # Handle direct text response
                         elif isinstance(data, str):
                             yield data
@@ -421,16 +416,16 @@ class Pipe:
                         if self.valves.debug_mode:
                             print(f"Debug - Unicode decode error: {e}")
                         continue
-                        
-        except Exception as e:
-            error_msg = f"❌ Streaming error: {str(e)}"
-            if self.valves.debug_mode:
-                print(f"Debug - streaming error: {e}")
-            yield error_msg
-        finally:
-            # Ensure status is cleared when streaming ends
+            
+            # Finalize status when streaming completes normally
             if __event_emitter__:
                 try:
                     asyncio.create_task(self.emit_status(__event_emitter__, "info", "✅ Response complete", True))
                 except Exception:
                     pass
+                            
+        except Exception as e:
+            error_msg = f"❌ Streaming error: {str(e)}"
+            if self.valves.debug_mode:
+                print(f"Debug - streaming error: {e}")
+            yield error_msg
