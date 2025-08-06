@@ -199,6 +199,8 @@ class Pipe:
         """Pipe processing with streaming and UI feedback"""
         
         try:
+            # Reset any previous status
+            await self.emit_status(__event_emitter__, "info", "", True)
             await self.emit_status(__event_emitter__, "info", "🚀 Initializing Flowise request...", False)
 
             if self.valves.debug_mode:
@@ -280,7 +282,11 @@ class Pipe:
 
             # Handle streaming response
             if stream_enabled:
-                return self._handle_streaming_response(response, __event_emitter__)
+                try:
+                    return self._handle_streaming_response(response, __event_emitter__)
+                finally:
+                    # Ensure status is cleared when streaming ends
+                    await self.emit_status(__event_emitter__, "info", "✅ Response complete", True)
             else:
                 # Handle non-streaming response
                 await self.emit_status(__event_emitter__, "info", "📝 Processing response...", False)
@@ -359,6 +365,12 @@ class Pipe:
                 print(f"Debug - pipe() error: {e}")
             await self.emit_status(__event_emitter__, "error", error_msg, True)
             return error_msg
+        finally:
+            if __event_emitter__:
+                try:
+                    await self.emit_status(__event_emitter__, "info", "", True)
+                except Exception:
+                    pass
 
     def _handle_streaming_response(
         self, 
@@ -415,3 +427,10 @@ class Pipe:
             if self.valves.debug_mode:
                 print(f"Debug - streaming error: {e}")
             yield error_msg
+        finally:
+            # Ensure status is cleared when streaming ends
+            if __event_emitter__:
+                try:
+                    asyncio.create_task(self.emit_status(__event_emitter__, "info", "✅ Response complete", True))
+                except Exception:
+                    pass
