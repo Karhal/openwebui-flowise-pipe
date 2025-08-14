@@ -12,6 +12,9 @@ An OpenWebUI pipe that provides seamless integration with Flowise AI workflows, 
 - **Flexible Response Handling**: Supports multiple Flowise response formats
 - **Session Management**: Maintains conversation context across messages
 - **Unicode Support**: Proper handling of international characters and emojis
+ - **History Forwarding**: Optionally forwards prior messages to Flowise via `history`
+ - **Override Merging**: Merges user `overrideConfig` while preserving `sessionId`
+ - **File Uploads**: Forward files and data URLs via Flowise `uploads` API
 
 ## 🚀 Quick Start
 
@@ -64,8 +67,14 @@ The pipe can be configured through environment variables or the OpenWebUI interf
 | `FLOWISE_API_KEY` | Flowise API key | `""` | No* |
 | `enable_status_indicator` | Show status updates | `true` | No |
 | `emit_interval` | Status update frequency (seconds) | `1.0` | No |
-| `timeout` | Request timeout (seconds) | `120` | No |
+| `timeout` | Request timeout (seconds) | `600` | Yes, via `FLOWISE_TIMEOUT` |
+| `connect_timeout` | TCP connect timeout (seconds) | `15` | Yes, via `FLOWISE_CONNECT_TIMEOUT` |
+| `read_timeout` | Read timeout for non-streaming requests (seconds) | `600` | Yes, via `FLOWISE_READ_TIMEOUT` |
+| `read_timeout_stream` | Read timeout for streaming (SSE) requests (seconds) | `1800` | Yes, via `FLOWISE_READ_TIMEOUT_STREAM` |
 | `debug_mode` | Enable debug logging | `false` | No |
+| `history` | Forward prior messages (role/content) | auto | No |
+| `FLOWISE_ALLOW_REMOTE_FILE_URLS` | Allow http(s) URLs in uploads | `0` | No |
+| `FLOWISE_DEFAULT_UPLOAD_TYPE` | Default upload type | `file:full` | No |
 
 *Required if your Flowise instance has authentication enabled.
 
@@ -113,6 +122,66 @@ The pipe supports multiple Flowise response formats:
 - `response` field
 - Raw text responses
 - Streaming token events
+ - OpenAI-like delta choices in stream
+ 
+### File Uploads
+
+You can attach files either at the top-level `uploads` field or embedded in message content. The pipe will forward them to Flowise’s `uploads` API field.
+
+Minimal example (top-level):
+
+```json
+{
+  "uploads": [
+    {
+      "data": "data:text/plain;base64,SGVsbG8=",
+      "type": "file:full",
+      "name": "example.txt",
+      "mime": "text/plain"
+    }
+  ]
+}
+```
+
+Supported sources:
+- Data URLs (`data:*;base64,....`)
+- Remote URLs (`http(s)://...`) if `FLOWISE_ALLOW_REMOTE_FILE_URLS=1`
+- Structured content items with `type` in `file`, `input_file`, `data_url`, or `image_url` (converted)
+
+Notes:
+- If `type` is not provided, `FLOWISE_DEFAULT_UPLOAD_TYPE` is used (`file:full`).
+- The pipe also sets `chatId` alongside `overrideConfig.sessionId` for maximum compatibility.
+### History Forwarding
+
+When sending a message, prior messages in the chat are converted to a minimal history object and sent to Flowise as `history`:
+
+```json
+{
+  "history": [
+    {"role": "system", "content": "You are helpful"},
+    {"role": "user", "content": "Hi"},
+    {"role": "assistant", "content": "Hello!"}
+  ]
+}
+```
+
+Only non-empty message contents are forwarded. Roles unsupported by Flowise are normalized to `user`.
+
+### Override Config Merging
+
+You can pass custom overrides using `overrideConfig` (or `flowise_override`). The pipe merges them while preserving the OpenWebUI session:
+
+```json
+{
+  "overrideConfig": {
+    "model": "gpt-4o-mini",
+    "temperature": 0.2
+  }
+}
+```
+
+If you explicitly set `sessionId`, your value will be used.
+
 
 ## 🔧 Troubleshooting
 
@@ -132,7 +201,8 @@ The pipe supports multiple Flowise response formats:
 **Cause**: Flowise instance is slow or unreachable.
 
 **Solutions**:
-- Increase the timeout value
+- For streaming (SSE) timeouts: increase `FLOWISE_READ_TIMEOUT_STREAM`, e.g. `export FLOWISE_READ_TIMEOUT_STREAM=3600`
+- For general requests: adjust `FLOWISE_TIMEOUT` (applies to both connect/read), or tune `FLOWISE_CONNECT_TIMEOUT` and `FLOWISE_READ_TIMEOUT` separately
 - Check Flowise instance health
 - Verify network connectivity
 
